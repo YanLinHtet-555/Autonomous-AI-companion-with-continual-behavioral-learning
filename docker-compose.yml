@@ -1,0 +1,83 @@
+version: "3.9"
+
+# AI Companion — Docker Compose
+#
+# Usage:
+#   docker-compose up -d          # start in background
+#   docker-compose logs -f        # follow logs
+#   docker-compose down           # stop (data persists in ./data/)
+#
+# After the container is running, start the host-side monitor:
+#   python monitoring_agent.py
+#
+# Chat via CLI (runs on the host):
+#   python main.py
+#
+# Or call the API directly:
+#   curl http://localhost:8000/health
+#   curl http://localhost:8000/chat -d '{"message":"hello"}'
+
+services:
+  ai-companion:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-companion:latest
+    container_name: ai-companion
+
+    # ── GPU passthrough ────────────────────────────────────────────────────────
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # ── Ports ─────────────────────────────────────────────────────────────────
+    # Only bind to localhost — the monitoring agent and main.py talk over this
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # ── Persistent storage ────────────────────────────────────────────────────
+    # All learned data, model checkpoints, and keys live in ./data/
+    # This directory persists across container restarts and rebuilds.
+    volumes:
+      - ./data:/app/data
+
+    # ── Environment ───────────────────────────────────────────────────────────
+    environment:
+      # Tells the app where to write data inside the container
+      - AI_DATA_DIR=/app/data
+      # CUDA device visibility (all GPUs by default)
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+    # ── Network isolation ────────────────────────────────────────────────────
+    # The NetworkGuard in Python also blocks outbound connections, but this
+    # provides a second layer at the Docker network level.
+    # The container can only reach the host and other containers on ai-net.
+    networks:
+      - ai-net
+
+    # ── Resource limits ───────────────────────────────────────────────────────
+    # Prevents the container from starving the host during nightly training.
+    mem_limit: 6g
+    memswap_limit: 6g
+
+    # ── Restart policy ────────────────────────────────────────────────────────
+    restart: unless-stopped
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+networks:
+  ai-net:
+    driver: bridge
+    # Disable default internet routing — containers can only reach each other
+    # and the host via published ports.
+    internal: false   # set to true for full network isolation (breaks pip during build)

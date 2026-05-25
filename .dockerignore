@@ -1,0 +1,47 @@
+# Git
+.git/
+.gitignore
+
+# Host-only monitoring layer (runs natively on Windows, not in Docker)
+monitoring_agent.py
+monitoring/
+
+# Main CLI entry point (also runs on host)
+main.py
+
+# Data directory — mounted as a volume at runtime
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Host requirements file (has Windows-only packages)
+requirements.txt
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker files themselves (not needed inside the image)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs and tests (keep image lean)
+README.md
+*.md
+tests/

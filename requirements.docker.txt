@@ -1,0 +1,17 @@
+# Requirements for the Docker AI brain container
+# Windows-only packages (pywin32, pynput) are intentionally excluded —
+# the monitoring layer runs on the host, not inside Docker.
+#
+# PyTorch is installed separately in the Dockerfile with the correct CUDA index URL.
+
+numpy>=1.24.0
+watchdog>=3.0.0
+cryptography>=41.0.0
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.2
+rich>=13.7.0
+
+# FastAPI stack
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
