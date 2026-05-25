@@ -36,6 +36,7 @@ MEMORY = {
     "encryption_key_path": os.path.join(DATA_DIR, ".key"),
     "max_replay_buffer": 5000,
     "embed_dim": 384,
+    "level_path": os.path.join(DATA_DIR, "level.json"),
 }
 
 # Monitoring

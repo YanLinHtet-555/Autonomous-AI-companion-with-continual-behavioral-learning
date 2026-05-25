@@ -10,16 +10,24 @@ class Chat:
     """
 
     def __init__(self, model, tokenizer, experience_buffer,
-                 vector_store=None, device="cpu", max_memory_chunks=5):
+                 vector_store=None, device="cpu", max_memory_chunks=5,
+                 level_system=None):
         self.model = model
         self.tokenizer = tokenizer
         self.buffer = experience_buffer
         self.vector_store = vector_store
         self.device = device
         self.max_memory_chunks = max_memory_chunks
+        self.level_system = level_system
         self._history = []   # [(user_text, ai_response), ...]
 
     def respond(self, user_input: str, temperature=0.8, max_new_tokens=200):
+        # Apply level-based behaviour modifiers before generation
+        if self.level_system:
+            traits = self.level_system.get_traits()
+            temperature = min(1.5, max(0.1, temperature + traits["temperature_delta"]))
+            max_new_tokens = min(max_new_tokens, traits["max_tokens_cap"])
+
         # 1. Retrieve relevant memories
         memory_context = self._retrieve_memory(user_input)
 
@@ -28,6 +36,12 @@ class Chat:
 
         # 3. Generate response
         response = self._generate(prompt, temperature, max_new_tokens)
+
+        # Prepend level-appropriate prefix (baby level only)
+        if self.level_system:
+            prefix = self.level_system.get_traits().get("response_prefix", "")
+            if prefix:
+                response = prefix + response
 
         # 4. Store in experience buffer for future training
         self.buffer.add_conversation(user_input, response)

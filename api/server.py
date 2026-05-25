@@ -45,6 +45,7 @@ from learning.lora import inject_lora
 from learning.scheduler import LearningScheduler
 from summarizer.event_summarizer import EventSummarizer
 from companion.chat import Chat
+from companion.level_system import LevelSystem
 from companion.feedback_collector import FeedbackCollector
 from privacy.consent_manager import ConsentManager
 from security.audit_log import AuditLog
@@ -100,12 +101,16 @@ async def startup():
     co_learner = CoLearner(buffer, ai_logger=ai_logger)
     summarizer = EventSummarizer()
 
+    level_system = LevelSystem(MEMORY["level_path"], ai_logger=ai_logger)
+
     learner = ContinualLearner(
         model, trainer, buffer,
         ewc_lambda=TRAINING["ewc_lambda"],
         replay_ratio=TRAINING["replay_ratio"],
         device=DEVICE,
         ai_logger=ai_logger,
+        level_system=level_system,
+        get_study_minutes=co_learner.get_total_study_minutes,
     )
     scheduler = LearningScheduler(
         learner, buffer, summarizer, monitor_manager=None,
@@ -116,15 +121,16 @@ async def startup():
     )
     scheduler.start()
 
-    chat = Chat(model, tokenizer, buffer, vector_store, device=DEVICE)
+    chat = Chat(model, tokenizer, buffer, vector_store, device=DEVICE,
+                level_system=level_system)
     feedback = FeedbackCollector(buffer)
 
     _components.update({
         "chat": chat, "feedback": feedback, "buffer": buffer,
         "vector_store": vector_store, "learner": learner,
         "scheduler": scheduler, "summarizer": summarizer,
-        "co_learner": co_learner, "audit": audit,
-        "ai_logger": ai_logger,
+        "co_learner": co_learner, "level_system": level_system,
+        "audit": audit, "ai_logger": ai_logger,
     })
 
     audit.record("SERVER_START", f"API server started on {DEVICE}", severity="LOW")
@@ -264,13 +270,35 @@ def share(req: ShareRequest):
 @app.get("/stats")
 def stats():
     buf_stats = _components["buffer"].stats()
-    learn_summary = _components["learner"].get_learning_summary()
+    learner = _components["learner"]
     co = _components["co_learner"]
+    ls = _components["level_system"]
+    experiences = buf_stats["total"]
+    study_min = co.get_total_study_minutes()
     return {
         "memory": buf_stats,
-        "learning": learn_summary,
-        "total_study_minutes": co.get_total_study_minutes(),
+        "learning": learner.get_learning_summary(),
+        "total_study_minutes": study_min,
         "topics_studied": co.get_all_topics(),
+        "level": ls.current_level,
+        "level_status": ls.format_status(),
+        "level_progress": ls.get_progress(experiences, learner.training_sessions, study_min),
+    }
+
+
+@app.get("/level")
+def level():
+    ls = _components["level_system"]
+    co = _components["co_learner"]
+    learner = _components["learner"]
+    buf = _components["buffer"]
+    experiences = buf.stats()["total"]
+    study_min = co.get_total_study_minutes()
+    return {
+        "current": ls.current_level,
+        "status": ls.format_status(),
+        "all_levels": ls.all_levels_info(),
+        "progress": ls.get_progress(experiences, learner.training_sessions, study_min),
     }
 
 

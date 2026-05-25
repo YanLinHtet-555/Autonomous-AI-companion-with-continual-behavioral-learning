@@ -17,7 +17,7 @@ class ContinualLearner:
 
     def __init__(self, model, trainer, experience_buffer,
                  ewc_lambda=5000, replay_ratio=0.3, device="cpu",
-                 ai_logger=None):
+                 ai_logger=None, level_system=None, get_study_minutes=None):
         self.model = model
         self.trainer = trainer
         self.buffer = experience_buffer
@@ -25,6 +25,10 @@ class ContinualLearner:
         self.replay_ratio = replay_ratio
         self.device = device
         self.ai_logger = ai_logger
+        self.level_system = level_system
+        # Callable that returns total co-learning study minutes (injected to avoid
+        # a circular import between ContinualLearner and CoLearner)
+        self._get_study_minutes = get_study_minutes or (lambda: 0.0)
 
         # EWC state
         self._fisher = {}       # param name -> importance (Fisher diagonal)
@@ -116,6 +120,15 @@ class ContinualLearner:
 
         if verbose:
             print(f"[ContinualLearner] Done. Avg loss: {avg_loss:.4f}")
+
+        # Check whether training pushed the AI to the next level
+        if self.level_system:
+            self.level_system.update(
+                experiences=self.buffer.stats().get("total", 0),
+                training_sessions=len(self.train_history),
+                study_minutes=self._get_study_minutes(),
+            )
+
         return record
 
     # ------------------------------------------------------------------ #
@@ -175,6 +188,10 @@ class ContinualLearner:
             self.model.zero_grad()
         except Exception:
             pass
+
+    @property
+    def training_sessions(self) -> int:
+        return len(self.train_history)
 
     def get_learning_summary(self):
         if not self.train_history:

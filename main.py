@@ -31,6 +31,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from config import MODEL, TRAINING, MEMORY, MONITORING, PRIVACY, SECURITY, DEVICE
+from companion.level_system import LevelSystem
 from model.transformer import CompanionModel
 from model.tokenizer import BPETokenizer
 from model.trainer import Trainer
@@ -147,6 +148,9 @@ def load_system():
     # ── 6. Co-learning engine (created before monitor so monitor can reference it) ──
     co_learner = CoLearner(buffer, ai_logger=ai_logger)
 
+    # ── 6b. Level system ─────────────────────────────────────────────────
+    level_system = LevelSystem(MEMORY["level_path"], ai_logger=ai_logger)
+
     # ── 7. Monitoring ────────────────────────────────────────────────────
     privacy_cfg = consent.as_dict()
     summarizer = EventSummarizer()
@@ -163,6 +167,8 @@ def load_system():
         replay_ratio=TRAINING["replay_ratio"],
         device=DEVICE,
         ai_logger=ai_logger,
+        level_system=level_system,
+        get_study_minutes=co_learner.get_total_study_minutes,
     )
     scheduler = LearningScheduler(
         learner, buffer, summarizer, monitor,
@@ -173,7 +179,8 @@ def load_system():
     )
 
     # ── 8. Companion ─────────────────────────────────────────────────────
-    chat = Chat(model, tokenizer, buffer, vector_store, device=DEVICE)
+    chat = Chat(model, tokenizer, buffer, vector_store, device=DEVICE,
+                level_system=level_system)
     feedback = FeedbackCollector(buffer)
     suggestions = SuggestionEngine(
         monitor, buffer,
@@ -190,14 +197,13 @@ def load_system():
 
     audit.record("SYSTEM_READY", "All subsystems loaded", severity="LOW")
     console.print("[green]System ready.[/green]")
-    console.print("[green]System ready.[/green]")
 
     components = {
         "model": model, "tokenizer": tokenizer, "trainer": trainer,
         "buffer": buffer, "vector_store": vector_store,
         "monitor": monitor, "summarizer": summarizer,
         "learner": learner, "scheduler": scheduler,
-        "co_learner": co_learner,
+        "co_learner": co_learner, "level_system": level_system,
         "chat": chat, "feedback": feedback, "suggestions": suggestions,
         "consent": consent, "data_mgr": data_mgr,
         "audit": audit, "access_ctrl": access_ctrl,
@@ -240,7 +246,9 @@ def run_chat(c: dict):
             "  /learning-stats             Study time per topic\n\n"
             "[cyan]Self-improvement:[/cyan]\n"
             "  /train                      Trigger AI self-training now\n"
-            "  /stats                      Memory + training stats\n\n"
+            "  /stats                      Memory + training stats\n"
+            "  /level                      Show current AI level + all levels\n"
+            "  /level-progress             What's needed to reach the next level\n\n"
             "[yellow]Transparency:[/yellow]\n"
             "  /ai-log                     Everything AI did in background\n"
             "  /audit                      Full encrypted audit trail\n"
@@ -283,6 +291,48 @@ def run_chat(c: dict):
         elif cmd == "/stats":
             data_mgr.show_stats()
             console.print(f"[dim]{learner.get_learning_summary()}[/dim]")
+
+        elif cmd == "/level":
+            ls = c["level_system"]
+            console.print(f"\n[bold cyan]AI Level:[/bold cyan] {ls.format_status()}\n")
+            for info in ls.all_levels_info():
+                marker = "[bold green]◀ current[/bold green]" if info["current"] else ""
+                t = info["thresholds"]
+                console.print(
+                    f"  {info['icon']}  [bold]{info['label']:<14}[/bold] "
+                    f"{info['description']}  {marker}"
+                )
+                if not info["current"] and t["experiences"] > 0:
+                    console.print(
+                        f"       Requires: {t['experiences']} exp  "
+                        f"| {t['training_sessions']} training sessions  "
+                        f"| {t['study_minutes']} study min"
+                    )
+
+        elif cmd == "/level-progress":
+            ls = c["level_system"]
+            p = ls.get_progress(
+                experiences=c["buffer"].stats()["total"],
+                training_sessions=learner.training_sessions,
+                study_minutes=c["co_learner"].get_total_study_minutes(),
+            )
+            if p.get("at_max"):
+                console.print(
+                    f"\n[bold green]Max level reached: PROFESSIONAL[/bold green]\n"
+                    f"[dim]{p['description']}[/dim]"
+                )
+            else:
+                needs = p["needs"]
+                has = p["has"]
+                console.print(
+                    f"\n[bold cyan]Level:[/bold cyan] {p['label'].upper()} → "
+                    f"[bold]{p['next_level'].upper()}[/bold]\n"
+                )
+                for metric, need in needs.items():
+                    have = has[metric]
+                    done = need == 0
+                    bar = "[green]✓[/green]" if done else f"need {need} more"
+                    console.print(f"  {metric:<22} have={have}  {bar}")
 
         # ── feedback ──────────────────────────────────────────────────────
         elif cmd == "/approve":
@@ -563,11 +613,12 @@ def main():
     c["scheduler"].start()
     c["suggestions"].start()
 
+    lvl = c["level_system"]
     console.print(
         f"[dim]Device: {DEVICE} | "
         f"Experiences: {c['buffer'].stats()['total']} | "
-        f"Network: BLOCKED (no data leaves this machine) | "
-        f"Encryption: AES-256 | Learning: LOCAL ONLY[/dim]"
+        f"Level: {lvl.format_status()} | "
+        f"Network: BLOCKED | Encryption: AES-256 | Learning: LOCAL ONLY[/dim]"
     )
 
     try:
