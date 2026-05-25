@@ -2,6 +2,10 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# When running in Docker, AI_DATA_DIR env var points to the mounted volume
+# (e.g. /app/data). On the host it falls back to BASE_DIR/data.
+DATA_DIR = os.environ.get("AI_DATA_DIR", os.path.join(BASE_DIR, "data"))
+
 # Model
 MODEL = {
     "vocab_size": 8000,
@@ -21,15 +25,15 @@ TRAINING = {
     "min_texts_to_train": 10,
     "replay_ratio": 0.3,       # 30% old data mixed in during fine-tuning
     "ewc_lambda": 5000,        # EWC penalty strength
-    "checkpoint_dir": os.path.join(BASE_DIR, "model", "checkpoints"),
-    "tokenizer_path": os.path.join(BASE_DIR, "model", "tokenizer.json"),
+    "checkpoint_dir": os.path.join(DATA_DIR, "checkpoints"),
+    "tokenizer_path": os.path.join(DATA_DIR, "tokenizer.json"),
 }
 
 # Memory
 MEMORY = {
-    "db_path": os.path.join(BASE_DIR, "memory", "data", "experiences.db"),
-    "vector_index_path": os.path.join(BASE_DIR, "memory", "data", "faiss.index"),
-    "encryption_key_path": os.path.join(BASE_DIR, "memory", "data", ".key"),
+    "db_path": os.path.join(DATA_DIR, "experiences.db"),
+    "vector_index_path": os.path.join(DATA_DIR, "faiss.index"),
+    "encryption_key_path": os.path.join(DATA_DIR, ".key"),
     "max_replay_buffer": 5000,
     "embed_dim": 384,
 }
@@ -48,7 +52,7 @@ MONITORING = {
         os.path.expanduser("~\\Projects"),
         "D:\\Git_projects",
     ],
-    "log_path": os.path.join(BASE_DIR, "memory", "data", "activity.log"),
+    "log_path": os.path.join(DATA_DIR, "activity.log"),
 }
 
 # Privacy — what is monitored (user controls these)
@@ -59,7 +63,7 @@ PRIVACY = {
     "monitor_time": True,
     "monitor_input": False,    # OFF by default — explicit opt-in required
     "excluded_apps": ["1Password", "KeePass", "banking"],
-    "consent_path": os.path.join(BASE_DIR, "privacy", "consent.json"),
+    "consent_path": os.path.join(DATA_DIR, "consent.json"),
 }
 
 # Suggestion engine
@@ -88,15 +92,15 @@ SUGGESTIONS = {
 #     • Disabling encryption or the network guard
 #
 SECURITY = {
-    "audit_log_path": os.path.join(BASE_DIR, "memory", "data", "audit.log"),
-    "audit_key_path": os.path.join(BASE_DIR, "memory", "data", ".audit_key"),
-    "breach_manifest_path": os.path.join(BASE_DIR, "memory", "data", "integrity.json"),
+    "audit_log_path": os.path.join(DATA_DIR, "audit.log"),
+    "audit_key_path": os.path.join(DATA_DIR, ".audit_key"),
+    "breach_manifest_path": os.path.join(DATA_DIR, "integrity.json"),
     "network_guard_enabled": True,   # block ALL outbound connections
     "protected_files": [
-        os.path.join(BASE_DIR, "memory", "data", "experiences.db"),
-        os.path.join(BASE_DIR, "memory", "data", "faiss.index"),
-        os.path.join(BASE_DIR, "memory", "data", ".key"),
-        os.path.join(BASE_DIR, "privacy", "consent.json"),
+        os.path.join(DATA_DIR, "experiences.db"),
+        os.path.join(DATA_DIR, "faiss.index"),
+        os.path.join(DATA_DIR, ".key"),
+        os.path.join(DATA_DIR, "consent.json"),
     ],
 }
 

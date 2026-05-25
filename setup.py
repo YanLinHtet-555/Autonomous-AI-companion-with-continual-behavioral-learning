@@ -182,11 +182,23 @@ def setup_privacy():
     print()
 
 
+def create_data_dirs():
+    from config import DATA_DIR, TRAINING
+    dirs = [
+        DATA_DIR,
+        TRAINING["checkpoint_dir"],
+    ]
+    for d in dirs:
+        os.makedirs(d, exist_ok=True)
+    print(f"[Setup] Data directory: {DATA_DIR}\n")
+
+
 if __name__ == "__main__":
     print("\n" + "="*60)
     print("  AI COMPANION — FIRST-RUN SETUP")
     print("="*60 + "\n")
 
+    create_data_dirs()
     check_dependencies()
     setup_privacy()
     train_tokenizer()
