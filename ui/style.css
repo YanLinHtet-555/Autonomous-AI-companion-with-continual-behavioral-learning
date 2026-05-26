@@ -1,0 +1,577 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   NEON — AI Companion UI  |  Dark Neon Cyberpunk Stylesheet
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Design Tokens ─────────────────────────────────────────────────────── */
+:root {
+  --bg:            #07070f;
+  --panel-bg:      #0d0d1a;
+  --panel-border:  #1a1a30;
+  --cyan:          #00eeff;
+  --magenta:       #ff44ff;
+  --white:         #e8f0ff;
+  --dim:           #4a5070;
+  --danger:        #ff3355;
+
+  --glow-cyan:     0 0 8px #00eeff88, 0 0 24px #00eeff44;
+  --glow-magenta:  0 0 8px #ff44ff88, 0 0 24px #ff44ff44;
+
+  --font:          'Rajdhani', system-ui, sans-serif;
+  --radius:        6px;
+
+  /* Timing */
+  --blink-speed:   3.6s;
+  --float-speed:   3s;
+}
+
+/* ── Reset + Base ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--white);
+  font-family: var(--font);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── App Layout ───────────────────────────────────────────────────────── */
+#app {
+  display: flex;
+  flex-direction: row;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* ── Left: Neon Side ──────────────────────────────────────────────────── */
+#neon-side {
+  position: relative;
+  flex: 0 0 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* Subtle radial ambient glow behind the character */
+  background: radial-gradient(ellipse 60% 60% at 50% 50%, #00eeff08 0%, transparent 70%);
+}
+
+/* Three.js canvas fills the neon side */
+#three-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  /* Transparent so the CSS background shows through */
+  background: transparent;
+}
+
+/* ── CSS Face Overlay ─────────────────────────────────────────────────── */
+/*
+  The face is positioned relative to #neon-side.
+  Vertical position (top: 28%) places it over the character's head
+  in the Three.js scene. Adjust if camera/model position changes.
+*/
+#neon-face {
+  position: absolute;
+  top: 28%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 72px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  pointer-events: none;
+  z-index: 10;
+  gap: 0;
+}
+
+/* Eyes */
+.eye {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: var(--glow-cyan);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: blink var(--blink-speed) ease-in-out infinite;
+  position: relative;
+}
+
+.eye:first-child { margin-right: auto; }
+.eye:nth-child(2) { margin-left: auto; }
+
+.pupil {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #001a22;
+}
+
+/* Mouth — sits below eyes, centered */
+#neon-mouth {
+  width: 100%;
+  height: 6px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#neon-mouth::after {
+  content: '';
+  display: block;
+  width: 28px;
+  height: 6px;
+  border-radius: 0 0 28px 28px;
+  background: transparent;
+  border: 2px solid var(--cyan);
+  border-top: none;
+  box-shadow: 0 0 6px var(--cyan);
+  transition: border-radius 0.3s, height 0.3s, width 0.3s;
+}
+
+/* ── Face Expression States ───────────────────────────────────────────── */
+
+/* idle: normal blink, small smile */
+#neon-face.idle .eye {
+  animation: blink var(--blink-speed) ease-in-out infinite;
+}
+#neon-face.idle #neon-mouth::after {
+  width: 28px; height: 6px;
+  border-radius: 0 0 28px 28px;
+}
+
+/* talking: quick blink, mouth opens */
+#neon-face.talking .eye {
+  animation: blink 1.2s ease-in-out infinite;
+}
+#neon-face.talking #neon-mouth::after {
+  width: 24px; height: 10px;
+  border-radius: 0 0 12px 12px;
+  border-top: none;
+}
+
+/* thinking: slow blink, neutral mouth, slight eye squint */
+#neon-face.thinking .eye {
+  animation: blink 4s ease-in-out infinite;
+  height: 14px; /* squint */
+}
+#neon-face.thinking #neon-mouth::after {
+  width: 20px; height: 3px;
+  border-radius: 2px;
+  border: 2px solid var(--cyan);
+  border-top: 2px solid var(--cyan);
+}
+
+/* happy: bright eyes, big smile */
+#neon-face.happy .eye {
+  animation: blink 0.8s ease-in-out infinite, eye-glow-happy 0.5s ease alternate infinite;
+  background: var(--magenta);
+  box-shadow: var(--glow-magenta);
+}
+#neon-face.happy #neon-mouth::after {
+  width: 36px; height: 10px;
+  border-radius: 0 0 36px 36px;
+  border-color: var(--magenta);
+  box-shadow: 0 0 8px var(--magenta);
+}
+
+/* sleepy: half-closed eyes, droopy mouth */
+#neon-face.sleepy .eye {
+  animation: none;
+  height: 10px;
+  opacity: 0.5;
+}
+#neon-face.sleepy #neon-mouth::after {
+  width: 18px; height: 3px;
+  border-radius: 2px;
+  border-color: var(--dim);
+  box-shadow: none;
+}
+
+/* ── Keyframe Animations ──────────────────────────────────────────────── */
+
+@keyframes blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  95%            { transform: scaleY(0.08); }
+}
+
+@keyframes eye-glow-happy {
+  from { box-shadow: var(--glow-magenta); }
+  to   { box-shadow: 0 0 16px #ff44ffcc, 0 0 40px #ff44ff66; }
+}
+
+/* Character name badge */
+#neon-name {
+  position: absolute;
+  bottom: 14%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 2.4rem;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  color: var(--cyan);
+  text-shadow: var(--glow-cyan);
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+}
+
+#neon-level-badge {
+  position: absolute;
+  bottom: 9%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  color: var(--dim);
+  border: 1px solid var(--panel-border);
+  padding: 2px 10px;
+  border-radius: 20px;
+  background: #0d0d1a88;
+  backdrop-filter: blur(4px);
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+  transition: color 0.6s, border-color 0.6s, box-shadow 0.6s;
+}
+
+/* Level badge color variants — set by JS on body data attribute */
+body[data-level="baby"]         #neon-level-badge { color: #8899aa; border-color: #8899aa44; }
+body[data-level="kid"]          #neon-level-badge { color: #44aaff; border-color: #44aaff44; box-shadow: 0 0 8px #44aaff22; }
+body[data-level="adult"]        #neon-level-badge { color: var(--cyan); border-color: #00eeff44; box-shadow: 0 0 8px #00eeff22; }
+body[data-level="scholar"]      #neon-level-badge { color: #aa66ff; border-color: #aa66ff44; box-shadow: 0 0 12px #aa66ff33; }
+body[data-level="professional"] #neon-level-badge { color: var(--magenta); border-color: #ff44ff44; box-shadow: 0 0 16px #ff44ff44; }
+
+/* ── Right: Chat Side ─────────────────────────────────────────────────── */
+#chat-side {
+  flex: 0 0 50%;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--panel-border);
+  position: relative;
+}
+
+/* ── Status Bar ───────────────────────────────────────────────────────── */
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  flex-shrink: 0;
+  background: #09091688;
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+#status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  flex-shrink: 0;
+  transition: background 0.4s, box-shadow 0.4s;
+}
+#status-dot.connected {
+  background: var(--cyan);
+  box-shadow: 0 0 6px var(--cyan);
+  animation: pulse-dot 2s ease infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+#status-text {
+  flex: 1;
+  color: var(--white);
+  opacity: 0.7;
+}
+
+#connection-badge {
+  font-size: 0.65rem;
+  letter-spacing: 0.15em;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid currentColor;
+  transition: color 0.4s, border-color 0.4s;
+}
+#connection-badge.connected    { color: var(--cyan); }
+#connection-badge.disconnected { color: var(--danger); }
+#connection-badge.reconnecting { color: #ffaa00; }
+
+/* ── Messages Area ────────────────────────────────────────────────────── */
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+#messages::-webkit-scrollbar { width: 4px; }
+#messages::-webkit-scrollbar-track { background: transparent; }
+#messages::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 2px; }
+#messages::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+
+/* ── Message Bubbles ─────────────────────────────────────────────────── */
+.message-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(10px);
+  animation: msg-appear 0.35s ease forwards;
+}
+
+@keyframes msg-appear {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Neon messages — left-aligned */
+.message-row.neon-row {
+  flex-direction: row;
+}
+
+/* User messages — right-aligned */
+.message-row.user-row {
+  flex-direction: row-reverse;
+}
+
+/* Avatar dot */
+.avatar-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+.neon-dot  { background: var(--cyan);    box-shadow: 0 0 6px var(--cyan); }
+.user-dot  { background: var(--magenta); box-shadow: 0 0 6px var(--magenta); }
+
+/* Bubble */
+.bubble {
+  max-width: 80%;
+  padding: 9px 13px;
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  font-weight: 400;
+  word-break: break-word;
+  position: relative;
+}
+
+.neon-row .bubble {
+  background: #111126;
+  border: 1px solid #1e1e3a;
+  color: var(--white);
+  border-bottom-left-radius: 2px;
+}
+
+.user-row .bubble {
+  background: #0f1f1f;
+  border: 1px solid #0d3030;
+  color: #cce8e8;
+  border-bottom-right-radius: 2px;
+}
+
+/* Typewriter cursor — blinking bar at end of Neon's text while typing */
+.bubble.typing-active::after {
+  content: '▌';
+  color: var(--cyan);
+  animation: cursor-blink 0.7s step-end infinite;
+  margin-left: 1px;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ── Proactive Divider ────────────────────────────────────────────────── */
+.proactive-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.5;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  margin: 4px 0 0;
+}
+.proactive-divider::before,
+.proactive-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--panel-border);
+}
+
+/* ── Typing Indicator ─────────────────────────────────────────────────── */
+#typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  flex-shrink: 0;
+}
+
+.typing-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.typing-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  opacity: 0.3;
+  animation: bounce-dot 1.2s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: translateY(0);   opacity: 0.3; }
+  40%            { transform: translateY(-6px); opacity: 1;   }
+}
+
+/* ── Input Row ────────────────────────────────────────────────────────── */
+#input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--panel-border);
+  background: #08081488;
+  backdrop-filter: blur(8px);
+  flex-shrink: 0;
+}
+
+#input {
+  flex: 1;
+  resize: none;
+  background: #111126;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  color: var(--white);
+  font-family: var(--font);
+  font-size: 0.95rem;
+  padding: 10px 13px;
+  line-height: 1.5;
+  min-height: 44px;
+  max-height: 120px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  overflow-y: auto;
+}
+#input::placeholder { color: var(--dim); }
+#input:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 2px #00eeff18;
+}
+
+#send-btn {
+  height: 44px;
+  padding: 0 18px;
+  background: transparent;
+  border: 1px solid var(--cyan);
+  border-radius: var(--radius);
+  color: var(--cyan);
+  font-family: var(--font);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s, color 0.2s;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+#send-btn:hover {
+  background: #00eeff18;
+  box-shadow: var(--glow-cyan);
+}
+#send-btn:active {
+  background: #00eeff30;
+}
+#send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RESPONSIVE — narrow screens stack character above chat
+═══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 720px) {
+  #app {
+    flex-direction: column;
+    overflow-y: auto;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  #neon-side {
+    flex: none;
+    width: 100%;
+    height: 44vh;
+    border-bottom: 1px solid var(--panel-border);
+  }
+
+  #chat-side {
+    flex: none;
+    width: 100%;
+    height: 56vh;
+    border-left: none;
+  }
+
+  #neon-name  { font-size: 1.8rem; bottom: 10%; }
+  #neon-level-badge { bottom: 4%; }
+
+  #neon-face {
+    top: 25%;
+    width: 60px;
+    height: 34px;
+  }
+  .eye { width: 16px; height: 16px; }
+  .pupil { width: 6px; height: 6px; }
+}
+
+/* Scan-line CRT overlay on the left panel (decorative) */
+#neon-side::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 238, 255, 0.012) 3px,
+    rgba(0, 238, 255, 0.012) 4px
+  );
+  z-index: 2;
+}

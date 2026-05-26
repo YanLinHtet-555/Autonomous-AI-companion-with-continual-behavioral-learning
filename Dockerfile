@@ -52,6 +52,7 @@ COPY model/         ./model/
 COPY privacy/       ./privacy/
 COPY security/      ./security/
 COPY summarizer/    ./summarizer/
+COPY ui/            ./ui/
 COPY config.py      ./
 COPY setup.py       ./
 

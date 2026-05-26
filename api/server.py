@@ -10,6 +10,8 @@ Endpoints:
   GET  /stats         Memory and training stats
   GET  /ai-log        Recent AI autonomous actions
   GET  /health        Health check
+  WS   /ws            WebSocket for the 3D UI (bidirectional chat with Neon)
+  GET  /              Serves ui/index.html
 
 The monitoring_agent.py on the host machine calls these endpoints.
 All data stays on localhost — nothing goes to the internet
@@ -26,10 +28,15 @@ sys.path.insert(0, BASE_DIR)
 from security import activate_network_guard
 activate_network_guard()
 
-from fastapi import FastAPI, HTTPException
+import asyncio
+import json
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Set
 import uvicorn
 
 from config import MODEL, TRAINING, MEMORY, PRIVACY, SECURITY, DEVICE
@@ -46,6 +53,8 @@ from learning.scheduler import LearningScheduler
 from summarizer.event_summarizer import EventSummarizer
 from companion.chat import Chat
 from companion.level_system import LevelSystem
+from companion.persona import get_system_prompt, get_proactive_message
+from companion.proactive_engine import ProactiveEngine
 from companion.feedback_collector import FeedbackCollector
 from privacy.consent_manager import ConsentManager
 from security.audit_log import AuditLog
@@ -61,10 +70,56 @@ app = FastAPI(
 # Only allow requests from localhost
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost", "http://127.0.0.1"],
+    allow_origins=["http://localhost", "http://127.0.0.1", "http://localhost:8000", "http://127.0.0.1:8000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve the UI from /ui path and root
+_UI_DIR = os.path.join(BASE_DIR, "ui")
+if os.path.isdir(_UI_DIR):
+    app.mount("/ui", StaticFiles(directory=_UI_DIR), name="ui")
+
+
+@app.get("/")
+def serve_ui():
+    index = os.path.join(_UI_DIR, "index.html")
+    if os.path.exists(index):
+        return RedirectResponse(url="/ui/index.html")
+    return {"message": "AI Companion API running. UI not found."}
+
+
+# ── WebSocket connection manager ─────────────────────────────────────────────
+
+class ConnectionManager:
+    def __init__(self):
+        self._active: Set[WebSocket] = set()
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self._active.add(ws)
+
+    def disconnect(self, ws: WebSocket):
+        self._active.discard(ws)
+
+    async def send(self, ws: WebSocket, payload: dict):
+        try:
+            await ws.send_text(json.dumps(payload))
+        except Exception:
+            self.disconnect(ws)
+
+    async def broadcast(self, payload: dict):
+        dead = set()
+        for ws in list(self._active):
+            try:
+                await ws.send_text(json.dumps(payload))
+            except Exception:
+                dead.add(ws)
+        self._active -= dead
+
+
+_manager = ConnectionManager()
+
 
 # ── Global system components (loaded at startup) ─────────────────────────────
 _components: dict = {}
@@ -125,11 +180,27 @@ async def startup():
                 level_system=level_system)
     feedback = FeedbackCollector(buffer)
 
+    async def _proactive_send(content: str, emotion: str = "idle"):
+        await _manager.broadcast({
+            "type": "proactive",
+            "content": content,
+            "emotion": emotion,
+        })
+
+    proactive = ProactiveEngine(
+        send_fn=_proactive_send,
+        level_system=level_system,
+        idle_threshold_sec=600,
+        check_interval_sec=60,
+    )
+    proactive.start()
+
     _components.update({
         "chat": chat, "feedback": feedback, "buffer": buffer,
         "vector_store": vector_store, "learner": learner,
         "scheduler": scheduler, "summarizer": summarizer,
         "co_learner": co_learner, "level_system": level_system,
+        "proactive": proactive,
         "audit": audit, "ai_logger": ai_logger,
     })
 
@@ -140,6 +211,7 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    _components.get("proactive") and _components["proactive"].stop()
     _components.get("scheduler", None) and _components["scheduler"].stop()
     _components.get("audit") and _components["audit"].record(
         "SERVER_STOP", "Clean shutdown", severity="LOW"
@@ -310,6 +382,107 @@ def ai_log(n: int = 20):
 @app.get("/learning-stats")
 def learning_stats(topic: str = None):
     return {"summary": _components["co_learner"].get_study_summary(topic)}
+
+
+# ── WebSocket — real-time chat with Neon ─────────────────────────────────────
+
+_last_ws_greeting: Optional[datetime] = None   # rate-limit: one greeting per hour max
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    global _last_ws_greeting
+    await _manager.connect(ws)
+    ls = _components.get("level_system")
+    buf = _components.get("buffer")
+    proactive = _components.get("proactive")
+
+    # Send initial status so the UI can render Neon's current level/appearance
+    if ls and buf:
+        await _manager.send(ws, {
+            "type": "status",
+            "level": ls.current_level,
+            "experiences": buf.stats().get("total", 0),
+        })
+
+    # Greet only on the first connection or after >1 h of silence
+    now = datetime.now()
+    if _last_ws_greeting is None or (now - _last_ws_greeting).total_seconds() > 3600:
+        _last_ws_greeting = now
+        period = "morning" if 6 <= now.hour < 17 else "evening"
+        greeting = get_proactive_message(period, ls.current_level if ls else "adult")
+        await _manager.send(ws, {
+            "type": "proactive",
+            "content": greeting,
+            "emotion": "happy",
+        })
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            if data.get("type") != "message":
+                continue
+
+            user_text = (data.get("content") or "").strip()
+            if not user_text:
+                continue
+
+            # Notify proactive engine the user is active
+            if proactive:
+                proactive.on_user_message()
+
+            # Typing indicator
+            await _manager.send(ws, {"type": "typing", "active": True})
+
+            # Run the (blocking) model generation in a thread pool
+            chat = _components["chat"]
+            system_prompt = get_system_prompt(ls.current_level if ls else "adult")
+            prefixed = f"{system_prompt}\n{user_text}"
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: chat.respond(prefixed, temperature=0.8, max_new_tokens=200),
+            )
+
+            # Turn off typing indicator
+            await _manager.send(ws, {"type": "typing", "active": False})
+
+            # Determine emotion from response content (simple heuristics)
+            emotion = _infer_emotion(response)
+
+            await _manager.send(ws, {
+                "type": "message",
+                "role": "neon",
+                "content": response,
+                "emotion": emotion,
+            })
+
+            # Update status after each message
+            if ls and buf:
+                await _manager.send(ws, {
+                    "type": "status",
+                    "level": ls.current_level,
+                    "experiences": buf.stats().get("total", 0),
+                })
+
+    except WebSocketDisconnect:
+        _manager.disconnect(ws)
+
+
+def _infer_emotion(text: str) -> str:
+    text_lower = text.lower()
+    if any(w in text_lower for w in ("sorry", "hmm", "let me think", "not sure", "unclear")):
+        return "thinking"
+    if any(w in text_lower for w in ("great", "awesome", "yes!", "love", "exciting", "!")):
+        return "happy"
+    if any(w in text_lower for w in ("tired", "later", "sleep", "night", "rest")):
+        return "sleepy"
+    return "idle"
 
 
 if __name__ == "__main__":

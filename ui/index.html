@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEON — AI Companion</title>
+
+  <!-- Google Fonts: Rajdhani for the cyberpunk aesthetic -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Three.js importmap — all three.js imports resolve from this CDN -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- ═══════════════════════════════════════════════════════
+         LEFT PANEL — Neon's 3D character
+    ════════════════════════════════════════════════════════════ -->
+    <div id="neon-side">
+      <!-- Three.js renders into this canvas -->
+      <canvas id="three-canvas"></canvas>
+
+      <!-- CSS face overlay — positioned over canvas where the head appears -->
+      <div id="neon-face" class="idle">
+        <div class="eye" id="eye-l"><div class="pupil"></div></div>
+        <div class="eye" id="eye-r"><div class="pupil"></div></div>
+        <div id="neon-mouth"></div>
+      </div>
+
+      <!-- Name and level badge displayed below the character -->
+      <div id="neon-name">NEON</div>
+      <div id="neon-level-badge">BABY</div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         RIGHT PANEL — Chat interface
+    ════════════════════════════════════════════════════════════ -->
+    <div id="chat-side">
+
+      <!-- Status bar: level and memory count -->
+      <div id="status-bar">
+        <span id="status-dot"></span>
+        <span id="status-text">Neon · BABY · 0 memories</span>
+        <span id="connection-badge" class="disconnected">OFFLINE</span>
+      </div>
+
+      <!-- Message list scrollable area -->
+      <div id="messages" role="log" aria-label="Chat messages" aria-live="polite"></div>
+
+      <!-- Animated typing indicator (3 bouncing dots) -->
+      <div id="typing-indicator" hidden aria-label="Neon is thinking">
+        <span class="avatar-dot neon-dot"></span>
+        <div class="typing-dots">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+
+      <!-- Input row -->
+      <div id="input-row">
+        <textarea
+          id="input"
+          placeholder="Talk to Neon…"
+          rows="1"
+          aria-label="Message input"
+          autocomplete="off"
+          spellcheck="true"
+        ></textarea>
+        <button id="send-btn" aria-label="Send message">Send</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Entry point — module so it can import neon-char.js -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>
