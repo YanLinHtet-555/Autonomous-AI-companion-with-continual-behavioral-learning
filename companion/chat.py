@@ -87,6 +87,9 @@ class Chat:
         if len(tokens) > max_ctx:
             tokens = tokens[-max_ctx:]
 
+        # Clamp to valid vocab range before embedding lookup
+        vocab_size = self.model.vocab_size
+        tokens = [min(max(t, 0), vocab_size - 1) for t in tokens]
         idx = torch.tensor([tokens], dtype=torch.long).to(self.device)
 
         with torch.no_grad():

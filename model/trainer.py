@@ -37,6 +37,13 @@ class Trainer:
         x = torch.tensor([t[:-1] for t in padded], dtype=torch.long).to(self.device)
         y = torch.tensor([t[1:] for t in padded], dtype=torch.long).to(self.device)
         y[y == 0] = -1  # mask padding from loss
+
+        # Clamp to valid vocab range — out-of-range IDs cause CUDA device asserts
+        vocab_size = self.model.vocab_size
+        x = x.clamp(0, vocab_size - 1)
+        valid = y != -1
+        y[valid] = y[valid].clamp(0, vocab_size - 1)
+
         return x, y
 
     def train_step(self, texts):

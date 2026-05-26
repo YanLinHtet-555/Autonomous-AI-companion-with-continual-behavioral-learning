@@ -52,6 +52,8 @@ services:
       # No outbound calls ever — keeps NetworkGuard happy.
       - HF_HUB_OFFLINE=1
       - TRANSFORMERS_OFFLINE=1
+      # Synchronous CUDA errors — gives accurate stack traces on crash
+      - CUDA_LAUNCH_BLOCKING=1
 
     # ── Network isolation ────────────────────────────────────────────────────
     # The NetworkGuard in Python also blocks outbound connections, but this

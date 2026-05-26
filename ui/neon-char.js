@@ -1,389 +1,526 @@
 /**
- * neon-char.js
- * ─────────────────────────────────────────────────────────────────────────────
- * Builds and animates Neon's holographic 3D character using Three.js primitives.
- * No external model files — everything is constructed from geometry + materials.
+ * neon-char.js — Neon: chibi AI girl character (Three.js primitives only)
  *
- * Public API (returned object):
- *   setEmotion(emotion)   — 'idle' | 'talking' | 'thinking' | 'happy' | 'sleepy'
- *   setLevel(level)       — 'baby' | 'kid' | 'adult' | 'scholar' | 'professional'
- *   dispose()             — clean up WebGL resources
- * ─────────────────────────────────────────────────────────────────────────────
+ * Style: big chibi head, large green glowing eyes, dark blue hair + antennas,
+ * headphones, white jacket, orange skirt, blue legs, animated arms.
+ *
+ * Public API:  setEmotion(emotion)  setLevel(level)  dispose()
  */
 
 import * as THREE from 'three';
 
 // ── Level definitions ────────────────────────────────────────────────────────
 const LEVELS = {
-  baby:         { color: 0x8899aa, glow: 0.3,  hairCount: 40,  orbs: false, crown: false },
-  kid:          { color: 0x44aaff, glow: 0.6,  hairCount: 80,  orbs: false, crown: false },
-  adult:        { color: 0x00eeff, glow: 1.0,  hairCount: 130, orbs: false, crown: false },
-  scholar:      { color: 0xaa66ff, glow: 1.3,  hairCount: 200, orbs: true,  crown: false },
-  professional: { color: 0xff44ff, glow: 1.8,  hairCount: 300, orbs: true,  crown: true  },
+  baby:         { eyeColor: 0x00cc44, glowColor: 0x00cc44, antColor: 0xffaa00, accentColor: 0xff9900, glow: 0.5,  showOrbs: false, showCrown: false },
+  kid:          { eyeColor: 0x00dd55, glowColor: 0x44aaff, antColor: 0xffbb00, accentColor: 0xff9900, glow: 0.9,  showOrbs: false, showCrown: false },
+  adult:        { eyeColor: 0x00ee44, glowColor: 0x00eeff, antColor: 0xffcc00, accentColor: 0xff9900, glow: 1.2,  showOrbs: false, showCrown: false },
+  scholar:      { eyeColor: 0x44ffaa, glowColor: 0xaa66ff, antColor: 0xcc88ff, accentColor: 0xaa66ff, glow: 1.5,  showOrbs: true,  showCrown: false },
+  professional: { eyeColor: 0x88ffcc, glowColor: 0xff44ff, antColor: 0xff88ff, accentColor: 0xff44ff, glow: 2.0,  showOrbs: true,  showCrown: true  },
 };
 
-// ── Emotion state descriptors ────────────────────────────────────────────────
+// arm target angles per emotion  { z: shoulder raise,  x: forward tilt }
+const ARM_POSES = {
+  idle:     { lz: -0.25, rx: 0.10, lx: 0.10, rz: 0.25 },
+  talking:  { lz: -0.55, rx: 0.20, lx: 0.20, rz: 0.70 },
+  thinking: { lz: -0.20, rx: 0.10, lx: 0.80, rz: 0.20 },
+  happy:    { lz: -1.10, rx: 0.10, lx: 0.10, rz: 1.10 },
+  sleepy:   { lz:  0.20, rx: 0.05, lx: 0.05, rz: -0.20 },
+};
+
 const EMOTIONS = {
-  idle:     { leanZ: 0,     eyeGlow: 1.0, bobSpeed: 1.0, tiltX: 0 },
-  talking:  { leanZ: 0.08,  eyeGlow: 2.2, bobSpeed: 1.5, tiltX: 0 },
-  thinking: { leanZ: 0,     eyeGlow: 0.4, bobSpeed: 0.6, tiltX: 0.26 }, // ~15°
-  happy:    { leanZ: 0,     eyeGlow: 2.8, bobSpeed: 2.4, tiltX: -0.1 },
-  sleepy:   { leanZ: 0.12,  eyeGlow: 0.2, bobSpeed: 0.4, tiltX: 0.15 },
+  idle:     { bobSpeed: 1.0, lean: 0,    tilt: 0,    eyeScale: 1.0 },
+  talking:  { bobSpeed: 1.6, lean: 0.05, tilt: 0,    eyeScale: 1.05 },
+  thinking: { bobSpeed: 0.6, lean: 0,    tilt: 0.22, eyeScale: 0.75 },
+  happy:    { bobSpeed: 2.6, lean: 0,    tilt: -0.1, eyeScale: 1.15 },
+  sleepy:   { bobSpeed: 0.3, lean: 0.18, tilt: 0.15, eyeScale: 0.55 },
 };
 
-/**
- * Initialise Neon's scene and attach to the given canvas element.
- * @param {HTMLCanvasElement} canvas
- * @returns {{ setEmotion, setLevel, dispose }}
- */
 export function initNeon(canvas) {
-  // ── Renderer ───────────────────────────────────────────────────────────────
-  const renderer = new THREE.WebGLRenderer({
-    canvas,
-    alpha: true,        // transparent background — CSS bg shows through
-    antialias: true,
-  });
+  // ── Renderer ──────────────────────────────────────────────────────────────
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(0x000000, 0);  // fully transparent clear
+  renderer.setClearColor(0x000000, 0);
 
-  // ── Scene ──────────────────────────────────────────────────────────────────
+  // ── Scene ─────────────────────────────────────────────────────────────────
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x07070f, 8, 22);
+  scene.fog = new THREE.Fog(0x07070f, 10, 24);
 
-  // ── Camera ─────────────────────────────────────────────────────────────────
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 50);
-  camera.position.set(0, 0.4, 5.2);
+  // ── Camera ────────────────────────────────────────────────────────────────
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
+  camera.position.set(0, 0.8, 5.8);
 
-  // ── Lighting ───────────────────────────────────────────────────────────────
-  const ambientLight = new THREE.AmbientLight(0x223344, 0.6);
-  scene.add(ambientLight);
-
-  // Main rim light from the upper-left
-  const rimLight = new THREE.DirectionalLight(0x00eeff, 0.9);
-  rimLight.position.set(-3, 4, 2);
-  scene.add(rimLight);
-
-  // Back fill
-  const fillLight = new THREE.DirectionalLight(0xff44ff, 0.3);
-  fillLight.position.set(3, -1, -3);
+  // ── Lights ────────────────────────────────────────────────────────────────
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  const keyLight = new THREE.DirectionalLight(0xffeedd, 1.1);
+  keyLight.position.set(-2, 5, 3);
+  scene.add(keyLight);
+  const fillLight = new THREE.DirectionalLight(0x88aaff, 0.4);
+  fillLight.position.set(3, 0, 2);
   scene.add(fillLight);
 
-  // ── Character group (everything under this rotates/translates together) ────
-  const neonGroup = new THREE.Group();
-  scene.add(neonGroup);
+  // ── Root ──────────────────────────────────────────────────────────────────
+  const root = new THREE.Group();
+  scene.add(root);
 
-  // ── HEAD ───────────────────────────────────────────────────────────────────
-  const headGeo  = new THREE.SphereGeometry(0.55, 32, 32);
-  const headMat  = new THREE.MeshToonMaterial({ color: 0x8899aa });
-  const headMesh = new THREE.Mesh(headGeo, headMat);
-  headMesh.position.y = 1.5;
-  neonGroup.add(headMesh);
+  // ── Shared materials ──────────────────────────────────────────────────────
+  const skinMat   = new THREE.MeshToonMaterial({ color: 0xffd5b8 });
+  const hairMat   = new THREE.MeshToonMaterial({ color: 0x1a2d4a });
+  const jacketMat = new THREE.MeshToonMaterial({ color: 0xe8eaf6 });
+  const blueMat   = new THREE.MeshToonMaterial({ color: 0x2a4080 });
+  const orangeMat = new THREE.MeshToonMaterial({ color: 0xff8c00 });
+  const darkMat   = new THREE.MeshToonMaterial({ color: 0x1a2030 });
 
-  // ── EYES (two glowing spheres) ─────────────────────────────────────────────
-  const eyeGeo = new THREE.SphereGeometry(0.1, 16, 16);
-  const eyeMatL = new THREE.MeshBasicMaterial({ color: 0x00eeff });
-  const eyeMatR = new THREE.MeshBasicMaterial({ color: 0x00eeff });
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HEAD GROUP
+  // ═══════════════════════════════════════════════════════════════════════════
+  const headGroup = new THREE.Group();
+  headGroup.position.y = 1.50;
+  root.add(headGroup);
 
-  const eyeL = new THREE.Mesh(eyeGeo, eyeMatL);
-  const eyeR = new THREE.Mesh(eyeGeo, eyeMatR);
-  eyeL.position.set(-0.2, 1.55, 0.48);
-  eyeR.position.set( 0.2, 1.55, 0.48);
-  neonGroup.add(eyeL, eyeR);
+  // ── Skull ─────────────────────────────────────────────────────────────────
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.60, 32, 32), skinMat);
+  skull.scale.y = 1.05;
+  headGroup.add(skull);
 
-  // Point lights behind the eyes for glow
-  const eyeLightL = new THREE.PointLight(0x00eeff, 0.8, 1.5);
-  const eyeLightR = new THREE.PointLight(0x00eeff, 0.8, 1.5);
-  eyeLightL.position.copy(eyeL.position);
-  eyeLightR.position.copy(eyeR.position);
-  neonGroup.add(eyeLightL, eyeLightR);
+  // ── Hair cap — covers top + back of head ─────────────────────────────────
+  const hairCapGeo = new THREE.SphereGeometry(0.625, 28, 16, 0, Math.PI * 2, 0, Math.PI * 0.60);
+  const hairCap    = new THREE.Mesh(hairCapGeo, hairMat);
+  hairCap.position.y = 0.02;
+  headGroup.add(hairCap);
 
-  // ── BODY — torso cylinder ─────────────────────────────────────────────────
-  const torsoGeo = new THREE.CylinderGeometry(0.32, 0.42, 1.05, 12, 1, true);
-  const torsoMat = new THREE.MeshToonMaterial({
-    color: 0x0a1a2a,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.85,
-  });
-  const torsoMesh = new THREE.Mesh(torsoGeo, torsoMat);
-  torsoMesh.position.y = 0.55;
-  neonGroup.add(torsoMesh);
+  // Hair side flaps (cover ears area)
+  function makeHairFlap(side) {
+    const g = new THREE.SphereGeometry(0.30, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55);
+    const m = new THREE.Mesh(g, hairMat);
+    m.scale.set(0.55, 1.0, 0.7);
+    m.position.set(side * 0.58, -0.18, 0.05);
+    headGroup.add(m);
+  }
+  makeHairFlap(-1);
+  makeHairFlap(1);
 
-  // Shoulder plane (flat disc) — gives a wider silhouette
-  const shoulderGeo = new THREE.CylinderGeometry(0.7, 0.7, 0.06, 20);
-  const shoulderMat = new THREE.MeshToonMaterial({
-    color: 0x001122,
-    transparent: true,
-    opacity: 0.6,
-  });
-  const shoulderMesh = new THREE.Mesh(shoulderGeo, shoulderMat);
-  shoulderMesh.position.y = 1.02;
-  neonGroup.add(shoulderMesh);
+  // Small hair tuft / spike on top
+  const tuftGeo = new THREE.SphereGeometry(0.12, 8, 8);
+  const tuft    = new THREE.Mesh(tuftGeo, hairMat);
+  tuft.scale.set(0.6, 1.4, 0.6);
+  tuft.position.set(0.08, 0.64, 0.12);
+  tuft.rotation.z = -0.2;
+  headGroup.add(tuft);
 
-  // Neck
-  const neckGeo  = new THREE.CylinderGeometry(0.13, 0.16, 0.22, 10);
-  const neckMat  = new THREE.MeshToonMaterial({ color: 0x8899aa });
-  const neckMesh = new THREE.Mesh(neckGeo, neckMat);
-  neckMesh.position.y = 1.12;
-  neonGroup.add(neckMesh);
+  // ── Ears ──────────────────────────────────────────────────────────────────
+  function makeEar(side) {
+    const e = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 10), skinMat);
+    e.scale.set(0.55, 0.7, 0.5);
+    e.position.set(side * 0.60, -0.05, 0);
+    headGroup.add(e);
+  }
+  makeEar(-1); makeEar(1);
 
-  // ── AURA — large transparent outer shell ──────────────────────────────────
-  const auraGeo  = new THREE.SphereGeometry(1.2, 32, 32);
-  const auraMat  = new THREE.MeshBasicMaterial({
-    color: 0x00eeff,
-    transparent: true,
-    opacity: 0.06,
-    side: THREE.BackSide,   // render inner face so it's visible from outside
-    depthWrite: false,
-  });
-  const auraMesh = new THREE.Mesh(auraGeo, auraMat);
-  auraMesh.position.y = 0.9;
-  neonGroup.add(auraMesh);
+  // ── EYES — large, round, glowing green ────────────────────────────────────
+  const eyeGeoBase = new THREE.SphereGeometry(0.155, 20, 20);
 
-  // ── SCAN LINES — thin rings that drift upward ─────────────────────────────
-  const scanLines = [];
-  const scanMat   = new THREE.MeshBasicMaterial({
-    color: 0x00eeff,
-    transparent: true,
-    opacity: 0.18,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
+  const eyeMatL  = new THREE.MeshBasicMaterial({ color: 0x00ee44 });
+  const eyeMatR  = new THREE.MeshBasicMaterial({ color: 0x00ee44 });
+  const eyeL     = new THREE.Mesh(eyeGeoBase, eyeMatL);
+  const eyeR     = new THREE.Mesh(eyeGeoBase, eyeMatR);
+  eyeL.position.set(-0.215, 0.10, 0.54);
+  eyeR.position.set( 0.215, 0.10, 0.54);
+  eyeL.scale.set(1.0, 1.15, 0.55);
+  eyeR.scale.set(1.0, 1.15, 0.55);
+  headGroup.add(eyeL, eyeR);
 
-  for (let i = 0; i < 4; i++) {
-    const ringGeo  = new THREE.TorusGeometry(0.48 - i * 0.04, 0.012, 4, 40);
-    const ringMesh = new THREE.Mesh(ringGeo, scanMat.clone());
-    // Initial Y spread across the body
-    ringMesh.position.y = -0.3 + i * 0.5;
-    ringMesh.rotation.x = Math.PI / 2;
-    neonGroup.add(ringMesh);
-    scanLines.push({ mesh: ringMesh, baseY: -0.3 + i * 0.5, speed: 0.18 + i * 0.04 });
+  // Pupils
+  const pupilGeo = new THREE.SphereGeometry(0.08, 12, 12);
+  const pupilMat = new THREE.MeshBasicMaterial({ color: 0x001a08 });
+  const pupilL   = new THREE.Mesh(pupilGeo, pupilMat);
+  const pupilR   = new THREE.Mesh(pupilGeo, pupilMat.clone());
+  pupilL.position.set(-0.215, 0.09, 0.615);
+  pupilR.position.set( 0.215, 0.09, 0.615);
+  pupilL.scale.set(0.9, 1.0, 0.4);
+  pupilR.scale.set(0.9, 1.0, 0.4);
+  headGroup.add(pupilL, pupilR);
+
+  // Highlight dots
+  const hlGeo = new THREE.SphereGeometry(0.035, 8, 8);
+  const hlMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const hlL   = new THREE.Mesh(hlGeo, hlMat);
+  const hlR   = new THREE.Mesh(hlGeo, hlMat.clone());
+  hlL.position.set(-0.175, 0.16, 0.635);
+  hlR.position.set( 0.255, 0.16, 0.635);
+  headGroup.add(hlL, hlR);
+
+  // Eye glow lights
+  const eyeGlowL = new THREE.PointLight(0x00ee44, 0.7, 0.9);
+  const eyeGlowR = new THREE.PointLight(0x00ee44, 0.7, 0.9);
+  eyeGlowL.position.copy(eyeL.position);
+  eyeGlowR.position.copy(eyeR.position);
+  headGroup.add(eyeGlowL, eyeGlowR);
+
+  // Eyelids / brow lines (thin dark arches above each eye)
+  function makeBrow(side) {
+    const b = new THREE.Mesh(
+      new THREE.TorusGeometry(0.11, 0.018, 4, 16, Math.PI * 0.55),
+      new THREE.MeshToonMaterial({ color: 0x1a2d4a }),
+    );
+    b.position.set(side * 0.215, 0.255, 0.545);
+    b.rotation.z = side * 0.15;
+    b.scale.set(1.0, 1.0, 0.3);
+    headGroup.add(b);
+  }
+  makeBrow(-1); makeBrow(1);
+
+  // Smile / mouth — small curved arc
+  const smileMesh = new THREE.Mesh(
+    new THREE.TorusGeometry(0.085, 0.018, 6, 16, Math.PI * 0.65),
+    new THREE.MeshToonMaterial({ color: 0xcc5566 }),
+  );
+  smileMesh.position.set(0.015, -0.16, 0.575);
+  smileMesh.rotation.z = Math.PI + 0.1;
+  smileMesh.scale.set(1.0, 1.0, 0.3);
+  headGroup.add(smileMesh);
+
+  // ── ANTENNAS ──────────────────────────────────────────────────────────────
+  const antStemMat = new THREE.MeshToonMaterial({ color: 0x334455 });
+  const antTipMat  = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+
+  function makeAntenna(side) {
+    const g = new THREE.Group();
+    // Stem
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.28, 6), antStemMat);
+    stem.position.y = 0.14;
+    stem.rotation.z = side * 0.22;
+    g.add(stem);
+    // Tip sphere
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 10), antTipMat.clone());
+    tip.position.set(side * 0.065, 0.30, 0);
+    g.add(tip);
+    // Glow
+    const tl = new THREE.PointLight(0xffaa00, 0.5, 0.7);
+    tl.position.copy(tip.position);
+    g.add(tl);
+    g.position.set(side * 0.20, 0.60, 0.12);
+    headGroup.add(g);
+    return { tipMesh: tip, tipLight: tl };
+  }
+  const antL = makeAntenna(-1);
+  const antR = makeAntenna(1);
+
+  // ── HEADPHONES ────────────────────────────────────────────────────────────
+  const hpBodyMat = new THREE.MeshToonMaterial({ color: 0x2a3a5a });
+  const hpRimMat  = new THREE.MeshToonMaterial({ color: 0x44aaff, transparent: true, opacity: 0.8 });
+
+  function makeHeadphone(side) {
+    const g = new THREE.Group();
+    // Ear cup
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.155, 0.09, 16), hpBodyMat);
+    cup.rotation.z = Math.PI / 2;
+    g.add(cup);
+    // Rim ring
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.018, 6, 20), hpRimMat);
+    rim.rotation.y = Math.PI / 2;
+    g.add(rim);
+    g.position.set(side * 0.66, 0.05, 0);
+    headGroup.add(g);
+  }
+  makeHeadphone(-1); makeHeadphone(1);
+
+  // Headphone band arc
+  const bandCurve = new THREE.CubicBezierCurve3(
+    new THREE.Vector3(-0.55, 0.35, 0),
+    new THREE.Vector3(-0.20, 0.95, 0),
+    new THREE.Vector3( 0.20, 0.95, 0),
+    new THREE.Vector3( 0.55, 0.35, 0),
+  );
+  const bandGeo = new THREE.TubeGeometry(bandCurve, 20, 0.025, 6, false);
+  headGroup.add(new THREE.Mesh(bandGeo, hpBodyMat));
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NECK
+  // ═══════════════════════════════════════════════════════════════════════════
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.13, 0.20, 10), skinMat);
+  neck.position.y = 0.85;
+  root.add(neck);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BODY
+  // ═══════════════════════════════════════════════════════════════════════════
+  const bodyGroup = new THREE.Group();
+  root.add(bodyGroup);
+
+  // ── Jacket / torso ────────────────────────────────────────────────────────
+  const torso = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.30, 0.26, 0.60, 14, 1, false),
+    jacketMat,
+  );
+  torso.position.y = 0.55;
+  bodyGroup.add(torso);
+
+  // Blue undershirt panel at front
+  const shirt = new THREE.Mesh(
+    new THREE.BoxGeometry(0.30, 0.40, 0.06),
+    blueMat,
+  );
+  shirt.position.set(0, 0.56, 0.27);
+  bodyGroup.add(shirt);
+
+  // "NEON" chest badge — glowing panel
+  const badgeMat = new THREE.MeshBasicMaterial({ color: 0x00eeff });
+  const badge    = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.10, 0.02), badgeMat);
+  badge.position.set(0, 0.60, 0.31);
+  bodyGroup.add(badge);
+
+  // Jacket collar flaps
+  function makeCollar(side) {
+    const c = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.18, 0.06), jacketMat);
+    c.position.set(side * 0.10, 0.76, 0.26);
+    c.rotation.z = side * 0.35;
+    bodyGroup.add(c);
+  }
+  makeCollar(-1); makeCollar(1);
+
+  // ── Orange skirt ──────────────────────────────────────────────────────────
+  const skirt = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.38, 0.44, 0.34, 20, 1, false),
+    orangeMat,
+  );
+  skirt.position.y = 0.20;
+  bodyGroup.add(skirt);
+
+  // Skirt hem line
+  const hemRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.43, 0.016, 6, 30),
+    new THREE.MeshToonMaterial({ color: 0xcc6600 }),
+  );
+  hemRing.position.y = 0.04;
+  hemRing.rotation.x = Math.PI / 2;
+  bodyGroup.add(hemRing);
+
+  // ── ARMS ──────────────────────────────────────────────────────────────────
+  function makeArm(side, targetPose) {
+    const g = new THREE.Group();
+    g.position.set(side * 0.36, 0.73, 0);
+    g.rotation.z = targetPose.z;
+    g.rotation.x = targetPose.x;
+
+    // Upper arm — jacket sleeve
+    const upper = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.095, 0.085, 0.30, 10),
+      jacketMat,
+    );
+    upper.position.y = -0.15;
+    g.add(upper);
+
+    // Lower arm — blue
+    const lower = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.080, 0.072, 0.26, 10),
+      blueMat,
+    );
+    lower.position.y = -0.44;
+    g.add(lower);
+
+    // Orange glove / hand
+    const hand = new THREE.Mesh(
+      new THREE.SphereGeometry(0.105, 14, 14),
+      orangeMat,
+    );
+    hand.position.y = -0.63;
+    hand.scale.set(1.0, 0.85, 0.9);
+    g.add(hand);
+
+    // Subtle glow on hand
+    const hl = new THREE.PointLight(0xff8800, 0.35, 0.6);
+    hl.position.y = -0.63;
+    g.add(hl);
+
+    root.add(g);
+    return g;
   }
 
-  // ── HAIR — particle system ────────────────────────────────────────────────
-  // We keep a reference so we can rebuild on level change
-  let hairSystem = null;
+  const armGroupL = makeArm(-1, { z: -0.30, x: 0.12 });
+  const armGroupR = makeArm( 1, { z:  0.30, x: 0.12 });
 
-  /**
-   * Build a hair particle system with `count` points.
-   * Points are scattered in a flowing shape around/above the head.
-   */
-  function buildHair(count, color) {
-    if (hairSystem) {
-      neonGroup.remove(hairSystem);
-      hairSystem.geometry.dispose();
-      hairSystem.material.dispose();
-    }
+  let armPoseTarget = { ...ARM_POSES.idle };
+  let armPoseCurrent = { ...ARM_POSES.idle };
 
-    const positions  = new Float32Array(count * 3);
-    const velocities = new Float32Array(count * 3); // stored as userData
+  // ── LEGS ──────────────────────────────────────────────────────────────────
+  function makeLeg(side) {
+    const g = new THREE.Group();
+    g.position.set(side * 0.155, 0.02, 0);
 
-    for (let i = 0; i < count; i++) {
-      const angle  = Math.random() * Math.PI * 2;
-      // Radial spread: concentrated near head, fewer far strands
-      const r      = 0.35 + Math.random() * 0.55;
-      const ySpread = Math.random();                // 0 = head equator, 1 = above
-      const height  = 1.45 + ySpread * 0.85 + Math.random() * 0.2;
+    // Upper leg
+    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.095, 0.32, 10), blueMat);
+    upper.position.y = -0.16;
+    g.add(upper);
 
-      positions[i * 3]     = Math.cos(angle) * r * (1 - ySpread * 0.4);
-      positions[i * 3 + 1] = height;
-      positions[i * 3 + 2] = Math.sin(angle) * r * (1 - ySpread * 0.4);
+    // Knee accent ring — orange
+    const knee = new THREE.Mesh(
+      new THREE.TorusGeometry(0.10, 0.022, 6, 18),
+      orangeMat,
+    );
+    knee.position.y = -0.30;
+    knee.rotation.x = Math.PI / 2;
+    g.add(knee);
 
-      // Random drift velocity (Y dominant — hair flows upward)
-      velocities[i * 3]     = (Math.random() - 0.5) * 0.004;
-      velocities[i * 3 + 1] = 0.006 + Math.random() * 0.012;
-      velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.004;
-    }
+    // Lower leg
+    const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.090, 0.082, 0.28, 10), blueMat);
+    lower.position.y = -0.48;
+    g.add(lower);
 
-    const hairGeo = new THREE.BufferGeometry();
-    hairGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    const hairMat = new THREE.PointsMaterial({
-      color,
-      size: 0.04,
-      sizeAttenuation: true,
-      transparent: true,
-      opacity: 0.75,
-      depthWrite: false,
-    });
-
-    hairSystem = new THREE.Points(hairGeo, hairMat);
-    hairSystem.userData.velocities    = velocities;
-    hairSystem.userData.initialPositions = positions.slice(); // clone
-    hairSystem.userData.count         = count;
-    neonGroup.add(hairSystem);
+    bodyGroup.add(g);
+    return g;
   }
+  makeLeg(-1); makeLeg(1);
 
-  // ── AMBIENT PARTICLE FIELD — 200 slow-drifting white specks ───────────────
-  {
-    const count      = 200;
-    const pPositions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      pPositions[i * 3]     = (Math.random() - 0.5) * 12;
-      pPositions[i * 3 + 1] = (Math.random() - 0.5) * 12;
-      pPositions[i * 3 + 2] = (Math.random() - 0.5) * 6 - 2;
-    }
-    const pGeo = new THREE.BufferGeometry();
-    pGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
-    const pMat = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: 0.025,
-      transparent: true,
-      opacity: 0.4,
-      sizeAttenuation: true,
-      depthWrite: false,
-    });
-    const particles = new THREE.Points(pGeo, pMat);
-    scene.add(particles);
+  // ── FEET / shoes ──────────────────────────────────────────────────────────
+  function makeFoot(side) {
+    const g = new THREE.Group();
+    g.position.set(side * 0.155, -0.62, 0.055);
 
-    // Store for animation
-    scene.userData.ambientParticles = particles;
+    // Shoe body
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.165, 0.105, 0.26), blueMat);
+    g.add(shoe);
+
+    // Teal sole
+    const sole = new THREE.Mesh(
+      new THREE.BoxGeometry(0.175, 0.030, 0.275),
+      new THREE.MeshToonMaterial({ color: 0x00cccc }),
+    );
+    sole.position.y = -0.065;
+    g.add(sole);
+
+    // Orange accent stripe
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.17, 0.028, 0.10),
+      orangeMat,
+    );
+    stripe.position.set(0, 0.02, 0.08);
+    g.add(stripe);
+
+    bodyGroup.add(g);
   }
+  makeFoot(-1); makeFoot(1);
 
-  // ── KNOWLEDGE ORBS — scholar & professional ──────────────────────────────
-  // Orbiting glowing spheres added when level >= scholar
+  // ── Platform circle under feet ────────────────────────────────────────────
+  const platform = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.50, 0.50, 0.035, 32),
+    new THREE.MeshToonMaterial({ color: 0x00eeff, transparent: true, opacity: 0.25 }),
+  );
+  platform.position.y = -0.73;
+  root.add(platform);
+  // Glowing ring on platform edge
+  const platformRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.50, 0.014, 5, 40),
+    new THREE.MeshBasicMaterial({ color: 0x00eeff, transparent: true, opacity: 0.7 }),
+  );
+  platformRing.position.y = -0.72;
+  platformRing.rotation.x = Math.PI / 2;
+  root.add(platformRing);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KNOWLEDGE ORBS (scholar+)
+  // ═══════════════════════════════════════════════════════════════════════════
   const orbGroup = new THREE.Group();
-  orbGroup.position.y = 0.9;
-  neonGroup.add(orbGroup);
+  orbGroup.position.y = 1.0;
+  root.add(orbGroup);
 
   function buildOrbs(visible) {
-    // Remove existing orbs
     while (orbGroup.children.length) {
-      const child = orbGroup.children[0];
-      child.geometry && child.geometry.dispose();
-      child.material && child.material.dispose();
-      orbGroup.remove(child);
+      const c = orbGroup.children[0];
+      c.geometry?.dispose(); c.material?.dispose();
+      orbGroup.remove(c);
     }
     if (!visible) return;
-
-    const orbColors = [0x00eeff, 0xaa66ff, 0xff44ff, 0x44ffaa];
+    const colors = [0x00eeff, 0xaa66ff, 0xff44ff, 0x44ffaa];
     for (let i = 0; i < 4; i++) {
-      const orbGeo  = new THREE.SphereGeometry(0.09, 12, 12);
-      const orbMat  = new THREE.MeshBasicMaterial({
-        color: orbColors[i % orbColors.length],
-        transparent: true,
-        opacity: 0.9,
-      });
-      const orb = new THREE.Mesh(orbGeo, orbMat);
-      // Place each orb at 90° intervals to start
-      const angle = (i / 4) * Math.PI * 2;
-      orb.userData.orbitAngle  = angle;
-      orb.userData.orbitRadius = 1.05 + (i % 2) * 0.15;
-      orb.userData.orbitSpeed  = 0.6 + i * 0.15;
-      orb.userData.orbitY      = 0.2 * Math.sin(angle);
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.07, 10, 10),
+        new THREE.MeshBasicMaterial({ color: colors[i] }),
+      );
+      orb.userData = { angle: (i / 4) * Math.PI * 2, radius: 1.05 + (i%2)*0.15, speed: 0.6 + i*0.15 };
+      orb.add(new THREE.PointLight(colors[i], 0.4, 1.4));
       orbGroup.add(orb);
-
-      // Tiny glow light per orb
-      const orbLight = new THREE.PointLight(orbColors[i % orbColors.length], 0.35, 1.8);
-      orb.add(orbLight);
     }
   }
 
-  // ── CROWN RING — professional level ──────────────────────────────────────
+  // ── Crown (professional) ──────────────────────────────────────────────────
   let crownMesh = null;
-
   function buildCrown(visible) {
-    if (crownMesh) {
-      neonGroup.remove(crownMesh);
-      crownMesh.geometry.dispose();
-      crownMesh.material.dispose();
-      crownMesh = null;
-    }
+    if (crownMesh) { root.remove(crownMesh); crownMesh.geometry.dispose(); crownMesh.material.dispose(); crownMesh = null; }
     if (!visible) return;
-
-    const crownGeo  = new THREE.TorusGeometry(0.62, 0.025, 6, 60);
-    const crownMat  = new THREE.MeshBasicMaterial({
-      color: 0xff44ff,
-      transparent: true,
-      opacity: 0.85,
-    });
-    crownMesh = new THREE.Mesh(crownGeo, crownMat);
-    crownMesh.position.y = 2.12;
-    // Tilt slightly for style
-    crownMesh.rotation.x = 0.25;
-    neonGroup.add(crownMesh);
+    crownMesh = new THREE.Mesh(
+      new THREE.TorusGeometry(0.55, 0.022, 6, 50),
+      new THREE.MeshBasicMaterial({ color: 0xff44ff, transparent: true, opacity: 0.9 }),
+    );
+    crownMesh.position.y = 2.28;
+    crownMesh.rotation.x = 0.20;
+    root.add(crownMesh);
   }
 
-  // ── Happy burst particles ─────────────────────────────────────────────────
-  // Temporary burst spawned on happy emotion
+  // ── Ambient particles ─────────────────────────────────────────────────────
+  {
+    const n = 160; const pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      pos[i*3]   = (Math.random()-0.5)*14;
+      pos[i*3+1] = (Math.random()-0.5)*14;
+      pos[i*3+2] = (Math.random()-0.5)*6 - 2;
+    }
+    const pg = new THREE.BufferGeometry();
+    pg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    scene.add(new THREE.Points(pg,
+      new THREE.PointsMaterial({ color: 0xffffff, size: 0.020, transparent: true, opacity: 0.30, sizeAttenuation: true, depthWrite: false })
+    ));
+  }
+
+  // ── Happy burst ───────────────────────────────────────────────────────────
   const burstGroup = new THREE.Group();
   scene.add(burstGroup);
   let burstParticles = [];
 
-  function spawnHappyBurst() {
-    // Clear previous burst
-    for (const bp of burstParticles) {
-      burstGroup.remove(bp.mesh);
-      bp.mesh.geometry.dispose();
-      bp.mesh.material.dispose();
-    }
+  function spawnBurst() {
+    burstParticles.forEach(b => { burstGroup.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose(); });
     burstParticles = [];
-
-    const count = 24;
-    for (let i = 0; i < count; i++) {
-      const geo = new THREE.SphereGeometry(0.035, 6, 6);
-      const mat = new THREE.MeshBasicMaterial({
-        color: i % 2 === 0 ? 0x00eeff : 0xff44ff,
-        transparent: true,
-        opacity: 1,
-      });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(
-        (Math.random() - 0.5) * 0.6,
-        1.5 + Math.random() * 0.5,
-        (Math.random() - 0.5) * 0.6
+    for (let i = 0; i < 22; i++) {
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.032, 5, 5),
+        new THREE.MeshBasicMaterial({ color: i%2===0 ? 0x00eeff : 0xff8c00, transparent: true, opacity: 1 }),
       );
-      const speed = 0.04 + Math.random() * 0.06;
-      const dir   = new THREE.Vector3(
-        (Math.random() - 0.5) * 2,
-        Math.random() * 2,
-        (Math.random() - 0.5) * 2
-      ).normalize().multiplyScalar(speed);
+      mesh.position.set((Math.random()-0.5)*0.6, 1.5+Math.random()*0.5, (Math.random()-0.5)*0.6);
+      const dir = new THREE.Vector3((Math.random()-0.5)*2, Math.random()*2+0.5, (Math.random()-0.5)*2).normalize().multiplyScalar(0.04+Math.random()*0.05);
       burstGroup.add(mesh);
       burstParticles.push({ mesh, velocity: dir, life: 1.0 });
     }
   }
 
-  // ── State ──────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STATE
+  // ═══════════════════════════════════════════════════════════════════════════
   let currentEmotion = 'idle';
-  let currentLevel   = 'baby';
   let emotionTarget  = { ...EMOTIONS.idle };
   let emotionCurrent = { ...EMOTIONS.idle };
 
-  // Apply a level immediately — updates materials and rebuilds features
-  function applyLevel(levelName) {
-    const def = LEVELS[levelName] || LEVELS.baby;
-    currentLevel = levelName;
-
-    // Head and eye color
-    headMat.color.setHex(def.color);
-    eyeMatL.color.setHex(def.color);
-    eyeMatR.color.setHex(def.color);
-    eyeLightL.color.setHex(def.color);
-    eyeLightR.color.setHex(def.color);
-    auraMat.color.setHex(def.color);
-    // Update each cloned scan line material (they are independent instances)
-    scanLines.forEach(s => s.mesh.material.color.setHex(def.color));
-
-    // Eye brightness
-    eyeLightL.intensity = def.glow * 0.8;
-    eyeLightR.intensity = def.glow * 0.8;
-
-    // Rebuild hair
-    buildHair(def.hairCount, def.color);
-
-    // Orbs and crown
-    buildOrbs(def.orbs);
-    buildCrown(def.crown);
+  function applyLevel(name) {
+    const def = LEVELS[name] || LEVELS.baby;
+    eyeMatL.color.setHex(def.eyeColor);
+    eyeMatR.color.setHex(def.eyeColor);
+    eyeGlowL.color.setHex(def.eyeColor);
+    eyeGlowR.color.setHex(def.eyeColor);
+    eyeGlowL.intensity = def.glow * 0.7;
+    eyeGlowR.intensity = def.glow * 0.7;
+    antL.tipMesh.material.color.setHex(def.antColor);
+    antR.tipMesh.material.color.setHex(def.antColor);
+    antL.tipLight.color.setHex(def.antColor);
+    antR.tipLight.color.setHex(def.antColor);
+    badgeMat.color.setHex(def.glowColor);
+    platformRing.material.color.setHex(def.glowColor);
+    buildOrbs(def.showOrbs);
+    buildCrown(def.showCrown);
   }
 
-  // Bootstrap with baby level
   applyLevel('baby');
 
-  // ── Resize handling ────────────────────────────────────────────────────────
+  // ── Resize ────────────────────────────────────────────────────────────────
   function resize() {
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
     if (renderer.domElement.width !== w || renderer.domElement.height !== h) {
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
@@ -393,119 +530,96 @@ export function initNeon(canvas) {
   window.addEventListener('resize', resize);
   resize();
 
-  // ── Animation clock ────────────────────────────────────────────────────────
+  // ── Animation loop ────────────────────────────────────────────────────────
+  let _currentLevel = 'baby';
   const clock = new THREE.Clock();
-  let   animFrame = null;
+  let animFrame = null;
+  const K = 0.07;   // lerp factor per frame
 
   function animate() {
     animFrame = requestAnimationFrame(animate);
     resize();
+    const t = clock.getElapsedTime();
 
-    const elapsed = clock.getElapsedTime();
+    // Smooth emotion lerp
+    emotionCurrent.bobSpeed += (emotionTarget.bobSpeed - emotionCurrent.bobSpeed) * K;
+    emotionCurrent.lean     += (emotionTarget.lean     - emotionCurrent.lean)     * K;
+    emotionCurrent.tilt     += (emotionTarget.tilt     - emotionCurrent.tilt)     * K;
+    emotionCurrent.eyeScale += (emotionTarget.eyeScale - emotionCurrent.eyeScale) * K;
 
-    // ── Smooth emotion interpolation ──────────────────────────────────────
-    const lerpSpeed = 0.06;
-    emotionCurrent.leanZ    += (emotionTarget.leanZ    - emotionCurrent.leanZ)    * lerpSpeed;
-    emotionCurrent.eyeGlow  += (emotionTarget.eyeGlow  - emotionCurrent.eyeGlow)  * lerpSpeed;
-    emotionCurrent.bobSpeed += (emotionTarget.bobSpeed - emotionCurrent.bobSpeed) * lerpSpeed;
-    emotionCurrent.tiltX    += (emotionTarget.tiltX    - emotionCurrent.tiltX)    * lerpSpeed;
+    // Body bob
+    const bobY = Math.sin(t * Math.PI * 2 / 3 * emotionCurrent.bobSpeed) * 0.10;
+    root.position.y  = currentEmotion === 'happy' ? bobY + Math.abs(Math.sin(t * 7)) * 0.09 : bobY;
+    root.rotation.z  = emotionCurrent.lean;
+    root.rotation.y  = Math.sin(t * 0.4) * 0.08;    // gentle idle sway
 
-    // ── Character float (idle Y-bob) ──────────────────────────────────────
-    const bobY = Math.sin(elapsed * (Math.PI * 2 / 3) * emotionCurrent.bobSpeed) * 0.12;
-    neonGroup.position.y  = bobY;
-    neonGroup.rotation.y  = elapsed * 0.18;          // slow Y-axis rotation
-    neonGroup.rotation.z  = emotionCurrent.leanZ;    // forward lean (talking)
-    headMesh.rotation.x   = emotionCurrent.tiltX;    // head tilt (thinking)
+    // Head motion
+    headGroup.rotation.x = emotionCurrent.tilt;
+    headGroup.rotation.z = Math.sin(t * 0.7) * 0.04; // subtle head bob
 
-    // ── Eye glow pulse ────────────────────────────────────────────────────
-    const eyePulse      = 0.8 + 0.2 * Math.sin(elapsed * 5);
-    const glowIntensity = emotionCurrent.eyeGlow * eyePulse;
-    eyeLightL.intensity = glowIntensity;
-    eyeLightR.intensity = glowIntensity;
+    // Eye blink + scale
+    const blinkCycle = t % 4.2;
+    const blinkSq    = blinkCycle > 4.0 ? 0.08 : 1.0;
+    eyeL.scale.set(1.0, emotionCurrent.eyeScale * blinkSq, 0.55);
+    eyeR.scale.set(1.0, emotionCurrent.eyeScale * blinkSq, 0.55);
 
-    // ── Happy bounce ──────────────────────────────────────────────────────
-    if (currentEmotion === 'happy') {
-      neonGroup.position.y = bobY + Math.abs(Math.sin(elapsed * 8)) * 0.12;
+    // Eye glow pulse
+    const ep = 0.88 + 0.12 * Math.sin(t * 4.5);
+    eyeGlowL.intensity = emotionCurrent.eyeScale * ep * (LEVELS[_currentLevel]?.glow ?? 1.0) * 0.7;
+    eyeGlowR.intensity = eyeGlowL.intensity;
+
+    // Antenna tips pulse
+    const ap = 0.5 + 0.5 * Math.abs(Math.sin(t * 2.5));
+    antL.tipLight.intensity = ap * 0.5;
+    antR.tipLight.intensity = ap * 0.5;
+
+    // Arm animation
+    armPoseCurrent.lz += (armPoseTarget.lz - armPoseCurrent.lz) * K;
+    armPoseCurrent.rz += (armPoseTarget.rz - armPoseCurrent.rz) * K;
+    armPoseCurrent.lx += (armPoseTarget.lx - armPoseCurrent.lx) * K;
+    armPoseCurrent.rx += (armPoseTarget.rx - armPoseCurrent.rx) * K;
+    armGroupL.rotation.z = armPoseCurrent.lz;
+    armGroupR.rotation.z = armPoseCurrent.rz;
+    armGroupL.rotation.x = armPoseCurrent.lx;
+    armGroupR.rotation.x = armPoseCurrent.rx;
+    // Idle arm swing
+    if (currentEmotion === 'idle') {
+      armGroupL.rotation.x = armPoseCurrent.lx + Math.sin(t * 1.2) * 0.05;
+      armGroupR.rotation.x = armPoseCurrent.rx - Math.sin(t * 1.2) * 0.05;
     }
 
-    // ── Aura breath ───────────────────────────────────────────────────────
-    const auraScale = 1 + 0.04 * Math.sin(elapsed * 1.1);
-    auraMesh.scale.setScalar(auraScale);
+    // Badge pulse
+    badgeMat.color.setHSL(
+      (t * 0.08) % 1,
+      0.9,
+      0.55 + 0.1 * Math.sin(t * 3),
+    );
 
-    // ── Scan lines drift upward ────────────────────────────────────────────
-    for (const sl of scanLines) {
-      sl.mesh.position.y += sl.speed * 0.012;
-      // Loop back to bottom when they pass shoulder height
-      if (sl.mesh.position.y > 1.6) {
-        sl.mesh.position.y = -0.5;
-      }
-      // Fade out near the top
-      const prog = (sl.mesh.position.y + 0.5) / 2.1;
-      sl.mesh.material.opacity = 0.22 * (1 - prog * prog);
-    }
+    // Orbs orbit
+    orbGroup.children.forEach(orb => {
+      if (!orb.userData.angle) return;
+      orb.userData.angle += orb.userData.speed * 0.012;
+      orb.position.x = Math.cos(orb.userData.angle) * orb.userData.radius;
+      orb.position.z = Math.sin(orb.userData.angle) * orb.userData.radius;
+      orb.position.y = Math.sin(orb.userData.angle * 2) * 0.2;
+    });
 
-    // ── Hair drift upward then loop ────────────────────────────────────────
-    if (hairSystem) {
-      const pos    = hairSystem.geometry.attributes.position;
-      const vel    = hairSystem.userData.velocities;
-      const init   = hairSystem.userData.initialPositions;
-      const count  = hairSystem.userData.count;
+    // Crown spin
+    if (crownMesh) crownMesh.rotation.z = t * 0.35;
 
-      for (let i = 0; i < count; i++) {
-        const ix = i * 3, iy = i * 3 + 1, iz = i * 3 + 2;
+    // Platform ring pulse
+    platformRing.material.opacity = 0.4 + 0.3 * Math.sin(t * 2.2);
 
-        pos.array[ix] += vel[ix];
-        pos.array[iy] += vel[iy];
-        pos.array[iz] += vel[iz];
-
-        // When a particle drifts too far from its initial position, reset it
-        const dy = pos.array[iy] - init[iy];
-        const dx = pos.array[ix] - init[ix];
-        const dz = pos.array[iz] - init[iz];
-
-        if (dy > 0.55 || Math.abs(dx) > 0.35 || Math.abs(dz) > 0.35) {
-          pos.array[ix] = init[ix];
-          pos.array[iy] = init[iy];
-          pos.array[iz] = init[iz];
-        }
-      }
-      pos.needsUpdate = true;
-    }
-
-    // ── Knowledge orbs orbit ──────────────────────────────────────────────
-    for (const orb of orbGroup.children) {
-      if (!(orb instanceof THREE.Mesh)) continue;
-      orb.userData.orbitAngle += orb.userData.orbitSpeed * 0.012;
-      const a = orb.userData.orbitAngle;
-      const r = orb.userData.orbitRadius;
-      orb.position.x = Math.cos(a) * r;
-      orb.position.z = Math.sin(a) * r;
-      orb.position.y = Math.sin(a * 2) * 0.25; // gentle vertical weave
-    }
-
-    // ── Crown ring slow spin ──────────────────────────────────────────────
-    if (crownMesh) {
-      crownMesh.rotation.z = elapsed * 0.4;
-    }
-
-    // ── Ambient particles gentle drift ────────────────────────────────────
-    const ap = scene.userData.ambientParticles;
-    if (ap) {
-      ap.rotation.y = elapsed * 0.012;
-      ap.rotation.x = elapsed * 0.006;
-    }
-
-    // ── Happy burst particle physics ──────────────────────────────────────
+    // Burst particles
     for (let i = burstParticles.length - 1; i >= 0; i--) {
-      const bp = burstParticles[i];
-      bp.life -= 0.022;
-      bp.velocity.y -= 0.002; // gravity
-      bp.mesh.position.addScaledVector(bp.velocity, 1);
-      bp.mesh.material.opacity = Math.max(0, bp.life);
-      if (bp.life <= 0) {
-        burstGroup.remove(bp.mesh);
-        bp.mesh.geometry.dispose();
-        bp.mesh.material.dispose();
+      const b = burstParticles[i];
+      b.life -= 0.020;
+      b.velocity.y -= 0.0018;
+      b.mesh.position.addScaledVector(b.velocity, 1);
+      b.mesh.material.opacity = Math.max(0, b.life);
+      if (b.life <= 0) {
+        burstGroup.remove(b.mesh);
+        b.mesh.geometry.dispose(); b.mesh.material.dispose();
         burstParticles.splice(i, 1);
       }
     }
@@ -515,34 +629,18 @@ export function initNeon(canvas) {
 
   animate();
 
-  // ── Public API ─────────────────────────────────────────────────────────────
-
-  /**
-   * Change Neon's displayed emotion.
-   * Smoothly interpolates animation parameters to the new state.
-   * @param {'idle'|'talking'|'thinking'|'happy'|'sleepy'} emotion
-   */
+  // ── Public API ────────────────────────────────────────────────────────────
   function setEmotion(emotion) {
-    const def = EMOTIONS[emotion] || EMOTIONS.idle;
-    currentEmotion = emotion;
-    emotionTarget  = { ...def };
-
-    if (emotion === 'happy') {
-      spawnHappyBurst();
-    }
+    currentEmotion  = emotion;
+    emotionTarget   = { ...(EMOTIONS[emotion] || EMOTIONS.idle) };
+    armPoseTarget   = { ...(ARM_POSES[emotion] || ARM_POSES.idle) };
+    if (emotion === 'happy') spawnBurst();
   }
 
-  /**
-   * Evolve Neon to a new level — updates color, hair, orbs, crown.
-   * @param {'baby'|'kid'|'adult'|'scholar'|'professional'} level
-   */
   function setLevel(level) {
-    if (LEVELS[level]) {
-      applyLevel(level);
-    }
+    if (LEVELS[level]) { _currentLevel = level; applyLevel(level); }
   }
 
-  /** Release WebGL resources and stop the render loop. */
   function dispose() {
     window.removeEventListener('resize', resize);
     cancelAnimationFrame(animFrame);

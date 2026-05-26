@@ -29,7 +29,6 @@ const sendBtn       = document.getElementById('send-btn');
 const statusText    = document.getElementById('status-text');
 const statusDot     = document.getElementById('status-dot');
 const connBadge     = document.getElementById('connection-badge');
-const faceEl        = document.getElementById('neon-face');
 const levelBadgeEl  = document.getElementById('neon-level-badge');
 
 // ── Initialise the Three.js character ─────────────────────────────────────────
@@ -113,44 +112,32 @@ function handleIncoming(msg) {
   switch (msg.type) {
 
     case 'message': {
-      // Neon sent a chat message
       if (msg.role === 'neon' || !msg.role) {
         const emotion = msg.emotion || 'idle';
-        setFaceEmotion(emotion);
         neon.setEmotion('talking');
         appendNeonMessage(msg.content, false, () => {
-          // After typewriter finishes, return to the message's emotion or idle
-          const finalEmotion = SETTLED_EMOTION[emotion] || 'idle';
-          setFaceEmotion(finalEmotion);
-          neon.setEmotion(finalEmotion);
+          neon.setEmotion(SETTLED_EMOTION[emotion] || 'idle');
         });
       }
       break;
     }
 
     case 'proactive': {
-      // Neon initiated the conversation unprompted — show a divider first
       const emotion = msg.emotion || 'idle';
       appendProactiveDivider();
-      setFaceEmotion(emotion);
       neon.setEmotion('talking');
       appendNeonMessage(msg.content, false, () => {
-        const finalEmotion = SETTLED_EMOTION[emotion] || 'idle';
-        setFaceEmotion(finalEmotion);
-        neon.setEmotion(finalEmotion);
+        neon.setEmotion(SETTLED_EMOTION[emotion] || 'idle');
       });
       break;
     }
 
     case 'typing': {
-      // Server signals Neon is composing a reply
       if (msg.active) {
         typingEl.hidden = false;
-        setFaceEmotion('thinking');
         neon.setEmotion('thinking');
       } else {
         typingEl.hidden = true;
-        // Character emotion will be set when the actual message arrives
       }
       scrollToBottom();
       break;
@@ -330,14 +317,6 @@ function refreshStatusBar() {
   statusText.textContent = `Neon · ${label} · ${currentExperiences} memories`;
 }
 
-// ── Face emotion helper ───────────────────────────────────────────────────────
-
-function setFaceEmotion(emotion) {
-  // Remove all known emotion classes, then add the new one
-  faceEl.classList.remove('idle', 'talking', 'thinking', 'happy', 'sleepy');
-  faceEl.classList.add(emotion);
-}
-
 // ── Input behaviour ───────────────────────────────────────────────────────────
 
 // Auto-resize the textarea to fit content (up to CSS max-height)
@@ -385,6 +364,4 @@ connect();
 // Refresh status bar with initial values
 refreshStatusBar();
 
-// Kick off the idle emotion on the character
-setFaceEmotion('idle');
 neon.setEmotion('idle');

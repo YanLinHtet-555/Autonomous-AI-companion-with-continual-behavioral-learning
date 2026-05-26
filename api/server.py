@@ -152,6 +152,7 @@ async def startup():
                       checkpoint_dir=TRAINING["checkpoint_dir"])
     trainer.load_checkpoint("latest")
     model, _ = inject_lora(model, rank=8, alpha=16.0)
+    model = model.to(DEVICE)   # move LoRA params to same device as the rest
 
     co_learner = CoLearner(buffer, ai_logger=ai_logger)
     summarizer = EventSummarizer()
@@ -169,7 +170,7 @@ async def startup():
     )
     scheduler = LearningScheduler(
         learner, buffer, summarizer, monitor_manager=None,
-        train_hour=2,
+        train_hour=22,
         min_samples=TRAINING["min_texts_to_train"],
         ai_logger=ai_logger,
         data_gate=data_gate,

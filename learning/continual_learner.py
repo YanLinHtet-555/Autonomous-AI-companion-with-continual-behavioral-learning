@@ -147,13 +147,21 @@ class ContinualLearner:
                   if p.requires_grad}
 
         sample = texts[:min(50, len(texts))]
+        max_seq = self.model.max_seq
+        vocab_size = self.model.vocab_size
         for text in sample:
             tokens = self.trainer.tokenizer.encode(text)
             if len(tokens) < 2:
                 continue
+            # Truncate so sequence length never exceeds pos_embed table size
+            tokens = tokens[:max_seq]
             x = torch.tensor([tokens[:-1]], dtype=torch.long).to(self.device)
             y = torch.tensor([tokens[1:]], dtype=torch.long).to(self.device)
             y[y == 0] = -1
+
+            x = x.clamp(0, vocab_size - 1)
+            valid = y != -1
+            y[valid] = y[valid].clamp(0, vocab_size - 1)
 
             self.model.zero_grad()
             _, loss = self.model(x, y)
@@ -163,8 +171,8 @@ class ContinualLearner:
                     if p.requires_grad and p.grad is not None:
                         fisher[n] += p.grad.data.pow(2)
 
-        n = max(len(sample), 1)
-        self._fisher = {n: f / n for n, f in fisher.items()}
+        count = max(len(sample), 1)
+        self._fisher = {n: f / count for n, f in fisher.items()}
         self._ewc_ready = True
         self.model.train()
 
