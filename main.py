@@ -53,7 +53,7 @@ from security.audit_log import AuditLog
 from security.access_control import AccessControl
 from security.breach_detector import BreachDetector
 from security.ai_action_logger import AIActionLogger
-from security.data_access_gate import DataAccessGate, Mode as GateMode
+from security.data_access_gate import DataAccessGate
 from security import kill_switch
 import security.network_guard as network_guard
 

@@ -6,9 +6,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # (e.g. /app/data). On the host it falls back to BASE_DIR/data.
 DATA_DIR = os.environ.get("AI_DATA_DIR", os.path.join(BASE_DIR, "data"))
 
-# Model
+# Model architecture (vocab_size is excluded — passed separately from the tokenizer
+# so the actual trained vocab size is always used, not a hardcoded constant)
 MODEL = {
-    "vocab_size": 8000,
     "d_model": 256,
     "num_heads": 8,
     "num_layers": 6,

@@ -3,5 +3,5 @@ from .audit_log import AuditLog
 from .access_control import AccessControl
 from .breach_detector import BreachDetector
 from .ai_action_logger import AIActionLogger, Action
-from .data_access_gate import DataAccessGate, Mode as GateMode
+from .data_access_gate import DataAccessGate
 from . import kill_switch
